@@ -1,6 +1,5 @@
 *.sql
 *.exe
-*.yaml
 *.html
 *.sh
 *.sqlite
