@@ -364,9 +364,10 @@ func main() {
 			var cnt int
 			err := db.QueryRow("SELECT subscription_count FROM relay_stats WHERE relay_url = $1 AND date = $2", r.Name, queryDate).Scan(&cnt)
 			if err != nil {
-				cnt = 0
+				series = append(series, opts.LineData{})
+			} else {
+				series = append(series, opts.LineData{Value: cnt})
 			}
-			series = append(series, opts.LineData{Value: cnt})
 		}
 		short := strings.TrimPrefix(r.Name, "wss://")
 		if len(short) > 30 {
@@ -374,8 +375,9 @@ func main() {
 		}
 		line.AddSeries(fmt.Sprintf("%s (%d)", short, r.Count), series,
 			charts.WithLineChartOpts(opts.LineChart{
-				Smooth:     opts.Bool(true),
-				ShowSymbol: opts.Bool(false),
+				Smooth:       opts.Bool(true),
+				ShowSymbol:   opts.Bool(false),
+				ConnectNulls: opts.Bool(true),
 			}))
 	}
 
