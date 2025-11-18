@@ -1,0 +1,10 @@
+.git
+*.sqlite
+*.sql
+*.html
+nostr-relay-ranking
+bak
+update.sh
+k8s-*.yaml
+K8S_DEPLOYMENT.md
+README.md

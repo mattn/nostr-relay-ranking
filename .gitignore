@@ -1,0 +1,10 @@
+*.sql
+*.exe
+*.yaml
+*.html
+*.sh
+*.sqlite
+*.py
+nostr-relay-ranking
+bak
+k8s
