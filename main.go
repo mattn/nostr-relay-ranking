@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -21,6 +22,11 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/nbd-wtf/go-nostr"
 )
+
+var ignoreRelays = []string{
+	"wss://relay.ditto.pub",
+	"wss://relay.mostr.pub",
+}
 
 var pageTpl = template.Must(template.New("page").Funcs(template.FuncMap{
 	"add": func(a, b int) int { return a + b },
@@ -232,23 +238,16 @@ func count(relays []string) map[string]int {
 	wg.Wait()
 
 	result := make(map[string]int)
-	wssurls := []string{}
-	valid := false
 	for _, ev := range seen {
 		for _, tag := range ev.Tags {
 			if len(tag) >= 2 && tag[0] == "r" {
-				wssurl := strings.TrimRight(strings.TrimSpace(tag[1]), "/")
-				if strings.HasPrefix(wssurl, "ws") {
-					wssurls = append(wssurls, wssurl)
+				url := strings.TrimRight(strings.TrimSpace(tag[1]), "/")
+				if strings.HasPrefix(url, "ws") {
+					if !slices.Contains(ignoreRelays, url) {
+						result[url]++
+					}
 				}
-			} else if len(tag) >= 2 && tag[0] == "proxy" && tag[2] == "activitypub" {
-				valid = false
 			}
-		}
-	}
-	if valid {
-		for _, wssurl := range wssurls {
-			result[wssurl]++
 		}
 	}
 	return result
@@ -270,7 +269,11 @@ func main() {
 		//"wss://nos.lol",
 	}
 
+	log.Println("✨ リレーからのデータ収集を開始します...")
+
 	result := count(relays)
+
+	log.Println("✨ データ収集が完了しました。データベースに保存します...")
 
 	dbURL := os.Getenv("DATABASE_URL")
 	db, err := sql.Open("postgres", dbURL)
@@ -292,15 +295,31 @@ func main() {
 		log.Fatal(err)
 	}
 
-	today := time.Now().Format("2006-01-02")
-	db.Exec("DELETE FROM relay_stats WHERE date = $1", today)
+	tx, err := db.Begin()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	tx, _ := db.Begin()
-	stmt, _ := tx.Prepare("INSERT INTO relay_stats(date, relay_url, subscription_count) VALUES($1, $2, $3)")
+	log.Printf("✨ 今日の日付 (%s) の既存データを削除します...", time.Now().Format("2006-01-02"))
+
+	today := time.Now().Format("2006-01-02")
+	tx.Exec("DELETE FROM relay_stats WHERE date = $1", today)
+
+	log.Printf("✨ 今日の日付 (%s) の新しいデータ %d 件を挿入します...", today, len(result))
+
+	stmt, err := tx.Prepare("INSERT INTO relay_stats(date, relay_url, subscription_count) VALUES($1, $2, $3)")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	for url, cnt := range result {
-		stmt.Exec(today, url, cnt)
+		if cnt >= 0 {
+			stmt.Exec(today, url, cnt)
+		}
 	}
 	tx.Commit()
+
+	log.Println("✨ リレー統計をデータベースに保存しました")
 
 	var ranks []Rank
 	for url, cnt := range result {
@@ -323,6 +342,8 @@ func main() {
 		}(i)
 	}
 	wg.Wait()
+
+	log.Println("✨ リレー情報の取得が完了しました")
 
 	line := charts.NewLine()
 	line.SetGlobalOptions(
