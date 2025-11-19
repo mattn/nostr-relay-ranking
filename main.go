@@ -26,6 +26,9 @@ import (
 var ignoreRelays = []string{
 	"wss://relay.ditto.pub",
 	"wss://relay.mostr.pub",
+	"wss://relay.shitforce.one",
+	"wss://nostr.coinfundit.com",
+	"wss://relay.momostr.pink",
 }
 
 var pageTpl = template.Must(template.New("page").Funcs(template.FuncMap{
@@ -198,6 +201,65 @@ func fetchRelayInfo(relayURL string) RelayInfo {
 	return info
 }
 
+func fetchEvents(ctx context.Context, rurl string, max int) ([]*nostr.Event, error) {
+	relay, err := nostr.RelayConnect(ctx, rurl)
+	if err != nil {
+		return nil, err
+	}
+	defer relay.Close()
+
+	allEvents := make([]*nostr.Event, 0, max)
+	limit := 500
+	var until *nostr.Timestamp
+
+	for {
+		filter := nostr.Filter{Kinds: []int{10002}, Limit: limit}
+		if until != nil {
+			filter.Until = until
+		}
+
+		events, err := relay.QuerySync(ctx, filter)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, ev := range events {
+			filteredTags := make(nostr.Tags, 0, len(ev.Tags))
+			for _, tag := range ev.Tags {
+				if len(tag) >= 2 && tag[0] == "r" {
+					url := strings.TrimRight(strings.TrimSpace(tag[1]), "/")
+					if slices.Contains(ignoreRelays, url) {
+						continue
+					}
+				}
+				filteredTags = append(filteredTags, tag)
+			}
+			ev.Tags = filteredTags
+		}
+
+		allEvents = append(allEvents, events...)
+
+		if len(allEvents) >= max {
+			allEvents = allEvents[:max]
+			break
+		}
+
+		if len(events) < limit {
+			break
+		}
+
+		var oldest nostr.Timestamp = nostr.Now()
+		for _, ev := range events {
+			if ev.CreatedAt < oldest {
+				oldest = ev.CreatedAt
+			}
+		}
+		until = &oldest
+	}
+
+	return allEvents, nil
+}
+
 func count(relays []string) map[string]int {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -206,20 +268,12 @@ func count(relays []string) map[string]int {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	filter := nostr.Filter{Kinds: []int{10002}, Limit: 1000}
-
 	for _, relay := range relays {
 		wg.Add(1)
 		go func(rurl string) {
 			defer wg.Done()
-			relay, err := nostr.RelayConnect(ctx, rurl)
-			if err != nil {
-				log.Printf("connect error %s: %v", rurl, err)
-				return
-			}
-			defer relay.Close()
 
-			events, err := relay.QuerySync(ctx, filter)
+			events, err := fetchEvents(ctx, rurl, 1000)
 			if err != nil {
 				log.Printf("query error %s: %v", rurl, err)
 				return
@@ -243,9 +297,7 @@ func count(relays []string) map[string]int {
 			if len(tag) >= 2 && tag[0] == "r" {
 				url := strings.TrimRight(strings.TrimSpace(tag[1]), "/")
 				if strings.HasPrefix(url, "ws") {
-					if !slices.Contains(ignoreRelays, url) {
-						result[url]++
-					}
+					result[url]++
 				}
 			}
 		}
@@ -260,9 +312,9 @@ func main() {
 		"wss://nostr.compile-error.net",
 		"wss://cagliostr.compile-error.net",
 		"wss://r.kojira.io",
-		"wss://nostream.ocha.one",
-		"wss://nrelay.c-stellar.net",
-		"wss://relay.nostr.wirednet.jp",
+		//"wss://nrelay.c-stellar.net",
+		//"wss://relay.nostr.wirednet.jp",
+		//"wss://nostream.ocha.one",
 		//"wss://nostr-relay.nonce.academy",
 		//"wss://relay.damus.io",
 		//"wss://relay.nostr.bg",
@@ -290,6 +342,14 @@ func main() {
 			subscription_count INTEGER NOT NULL,
 			UNIQUE(date, relay_url)
 		)
+	`)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_relay_stats_url_date 
+		ON relay_stats(relay_url, date)
 	`)
 	if err != nil {
 		log.Fatal(err)
