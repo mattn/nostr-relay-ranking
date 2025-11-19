@@ -232,14 +232,23 @@ func count(relays []string) map[string]int {
 	wg.Wait()
 
 	result := make(map[string]int)
+	wssurls := []string{}
+	valid := false
 	for _, ev := range seen {
 		for _, tag := range ev.Tags {
 			if len(tag) >= 2 && tag[0] == "r" {
-				url := strings.TrimRight(strings.TrimSpace(tag[1]), "/")
-				if strings.HasPrefix(url, "ws") {
-					result[url]++
+				wssurl := strings.TrimRight(strings.TrimSpace(tag[1]), "/")
+				if strings.HasPrefix(wssurl, "ws") {
+					wssurls = append(wssurls, wssurl)
 				}
+			} else if len(tag) >= 2 && tag[0] == "proxy" && tag[2] == "activitypub" {
+				valid = false
 			}
+		}
+	}
+	if valid {
+		for _, wssurl := range wssurls {
+			result[wssurl]++
 		}
 	}
 	return result
