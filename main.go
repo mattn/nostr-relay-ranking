@@ -481,6 +481,10 @@ func main() {
 	}
 	defer f.Close()
 
+	if len(ranks) > 50 {
+		ranks = ranks[:50]
+	}
+
 	data := pageData{
 		UpdateTime: time.Now().Format("2006年01月02日 15:04"),
 		Ranks:      ranks,
