@@ -228,7 +228,7 @@ func fetchEvents(ctx context.Context, rurl string, max int) ([]*nostr.Event, err
 			for _, tag := range ev.Tags {
 				if len(tag) >= 2 && tag[0] == "r" {
 					url := strings.TrimRight(strings.TrimSpace(tag[1]), "/")
-					if slices.Contains(ignoreRelays, url) {
+					if slices.Contains(ignoreRelays, url) || strings.HasPrefix(url, "ws://") || strings.HasSuffix(url, ".local") {
 						continue
 					}
 				}
@@ -273,7 +273,7 @@ func count(relays []string) map[string]int {
 		go func(rurl string) {
 			defer wg.Done()
 
-			events, err := fetchEvents(ctx, rurl, 1000)
+			events, err := fetchEvents(ctx, rurl, 10000)
 			if err != nil {
 				log.Printf("query error %s: %v", rurl, err)
 				return
